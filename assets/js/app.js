@@ -1,7 +1,7 @@
 class Component extends DCLogic {
   // Website leads connection. Paste the Apps Script web app URL here (see SETUP.md). Empty = demo mode.
   LEADS = {
-    endpoint: '',
+    endpoint: 'https://script.google.com/macros/s/AKfycbzap71o6MA26tqXSkjp3akskjkzFF_pllLwDVRqI6JDjKvTPMC-NW57SCQ0yFyLh5k/exec',
     guideBase: 'https://sunproduction12.github.io/new-design/assets/guides/',
     guideFiles: { en: 'Sun-Production-Google-Business-Guide-EN.pdf', ko: 'Sun-Production-Google-Business-Guide-KO.pdf', es: 'Sun-Production-Google-Business-Guide-ES.pdf' }
   };
