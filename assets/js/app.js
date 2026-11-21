@@ -1,5 +1,16 @@
 class Component extends DCLogic {
-  state = { industry: 0, prob: 0, menuOpen: false, modal: '', sent: false, errs: {}, lang: 'en', cf: 'all', lb: -1, cs: -1 };
+  // Website leads connection. Paste the Apps Script web app URL here (see SETUP.md). Empty = demo mode.
+  LEADS = {
+    endpoint: '',
+    guideBase: 'https://sunproduction12.github.io/new-design/assets/guides/',
+    guideFiles: { en: 'Sun-Production-Google-Business-Guide-EN.pdf', ko: 'Sun-Production-Google-Business-Guide-KO.pdf', es: 'Sun-Production-Google-Business-Guide-ES.pdf' }
+  };
+
+  // Case study figures stay hidden until Yoomin approves each client (task: stop showing unverified numbers).
+  // Change a client to true once its numbers are confirmed.
+  VERIFIED = { porter: false, jcar: false, lumiglow: false, britishm: false, tlj: false, kccf: false };
+
+  state = { industry: 0, prob: 0, menuOpen: false, modal: '', sent: false, sending: false, sendErr: '', emailed: true, errs: {}, lang: 'en', cf: 'all', lb: -1, cs: -1 };
 
   componentDidMount() {
     this.onAnchor = (e) => {
@@ -73,7 +84,7 @@ class Component extends DCLogic {
 
   openModal(kind) {
     this.lastFocus = document.activeElement;
-    this.setState({ modal: kind, sent: false, errs: {}, menuOpen: false, lb: -1, cs: -1 });
+    this.setState({ modal: kind, sent: false, sending: false, sendErr: '', emailed: true, errs: {}, menuOpen: false, lb: -1, cs: -1 });
     setTimeout(() => {
       const first = document.querySelector('#lf input, #lf select, #lf textarea');
       if (first) first.focus();
@@ -81,30 +92,66 @@ class Component extends DCLogic {
   }
 
   closeModal() {
-    this.setState({ modal: '', sent: false, errs: {} });
+    this.setState({ modal: '', sent: false, sending: false, sendErr: '', errs: {} });
     if (this.lastFocus && this.lastFocus.focus) setTimeout(() => this.lastFocus.focus(), 30);
   }
 
   submit(e, fields) {
     if (e && e.preventDefault) e.preventDefault();
+    if (this.state.sending) return;
     const form = document.getElementById('lf');
     if (!form) return;
     const errs = {};
     let first = '';
+    const noGbp = !!(form.elements.nogbp && form.elements.nogbp.checked);
     fields.forEach((f) => {
       const el = form.elements[f.id];
       if (!el || f.type === 'check' || f.type === 'lang') return;
       const v = String(el.value || '').trim();
-      if (f.req && (!v || v === 'Choose one')) errs[f.id] = 'Please add ' + f.label.toLowerCase() + '.';
+      if (f.id === 'gbp') {
+        if (!noGbp && !/^https?:\/\/\S+\.\S+/i.test(v)) errs.gbp = v ? 'Please paste the full link, starting with https://' : 'Please add your Google Business Profile link, or tick the box below if you do not have one yet.';
+      } else if (f.req && (!v || v === 'Choose one')) errs[f.id] = 'Please add ' + f.label.toLowerCase() + '.';
       else if (f.type === 'email' && v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) errs[f.id] = 'Please enter a valid email address, like name@business.com.';
       if (errs[f.id] && !first) first = f.id;
     });
     if (first) {
-      this.setState({ errs: errs });
+      this.setState({ errs: errs, sendErr: '' });
       setTimeout(() => { const el = form.elements[first]; if (el && el.focus) el.focus(); }, 30);
       return;
     }
-    this.setState({ sent: true, errs: {} });
+    if (this.state.modal !== 'guide') {
+      this.setState({ sent: true, errs: {} });
+      return;
+    }
+    const val = (id) => (form.elements[id] ? String(form.elements[id].value || '').trim() : '');
+    const q = new URLSearchParams(window.location.search);
+    const data = {
+      form: 'guide', name: val('name'), business: val('business'), email: val('email'), phone: val('phone'),
+      gbp: noGbp ? '' : val('gbp'), noGbp: noGbp, category: val('category') === 'Choose one' ? '' : val('category'),
+      instagram: val('instagram'), website: val('website'), interest: val('interest') === 'Choose one' ? '' : val('interest'),
+      lang: this.state.lang || 'en', consent: !!(form.elements.consent && form.elements.consent.checked),
+      company_site: val('company_site'), page: window.location.href.split('#')[0], referrer: document.referrer || '',
+      utm_source: q.get('utm_source') || '', utm_medium: q.get('utm_medium') || '', utm_campaign: q.get('utm_campaign') || ''
+    };
+    if (!this.LEADS.endpoint) {
+      this.setState({ sent: true, errs: {}, emailed: true });
+      return;
+    }
+    this.setState({ sending: true, sendErr: '', errs: {} });
+    fetch(this.LEADS.endpoint, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(data) })
+      .then((r) => r.json())
+      .then((r) => {
+        if (r && r.ok) { this.setState({ sending: false, sent: true, emailed: r.emailed !== false }); return; }
+        if (r && r.error === 'invalid' && r.fields) {
+          const back = {};
+          r.fields.forEach((id) => { back[id] = id === 'gbp' ? 'Please check your Google Business Profile link.' : 'Please check this field.'; });
+          this.setState({ sending: false, errs: back });
+          return;
+        }
+        const msg = r && r.error === 'too_many' ? 'You have already requested the guide several times. Please check your inbox, or try again in an hour.' : 'Something went wrong. Please try again in a moment, or email marketer@sunproduction.app.';
+        this.setState({ sending: false, sendErr: msg });
+      })
+      .catch(() => this.setState({ sending: false, sendErr: 'We could not send your details. Please check your connection and try again, or email marketer@sunproduction.app.' }));
   }
 
   crInfo() {
@@ -165,25 +212,25 @@ class Component extends DCLogic {
     const pIdx = s.prob || 0;
 
     const caseData = [
-      { img: 'assets/img/porter-website.jpg', pos: 'center', name: 'Porter', tag: 'Restaurant · Ambler, PA', ch: 'A restaurant opening under a new name needed its website, Google listing and social channels to work together.', built: 'Website, Google Business Profile, Instagram and Meta, connected into one system.', num: '168K', cap: 'profile views', capLong: '168,000 profile views, 24,883 profile interactions and 15,689 website clicks.' },
-      { img: 'assets/img/jimmycar-website.jpg', pos: 'left top', name: 'JimmyCar Share', tag: 'Car sharing · Denver, CO', ch: 'A car-sharing business needed to take private rentals and capture car-owner leads on its own site.', built: 'Website, landing page, earnings calculator with lead capture, private-rental booking flow and customer dashboard, plus Google Business Profile optimization.', num: '836', cap: 'Business Profile views', capLong: '836 Business Profile views and 316 interactions, March to August 2026.' },
-      { img: 'assets/img/lumiglow-website.jpg', pos: 'center', name: 'LumiGlow', tag: 'Korean skincare brand', ch: 'Enter the U.S. market without heavy ad spend.', built: 'A 90-day creator campaign, with Instagram connected to the Shopify store.', num: '844K', cap: 'views on the top creator reel', capLong: '844K views on the top creator reel and 351,628 total Instagram views.' },
-      { img: 'assets/img/british-m-store.jpg', pos: 'center', name: 'British M', tag: 'Men\'s grooming brand', ch: 'Grow in the U.S. market.', built: 'Creator research, negotiation and campaign management, creator content and an Amazon storefront.', num: '286K', cap: 'views on the top creator reel', capLong: '286K views on the top creator reel and 109K on the second.' },
-      { img: 'assets/img/tous-les-jours-report.jpg', pos: 'left center', name: 'Tous les Jours', tag: 'Bakery café', ch: 'Keep the Google Business Profile active and visible.', built: '12 Google posts over three months, plus SEO-focused review replies.', num: '12,892', cap: 'Business Profile interactions', capLong: '12,892 Business Profile interactions, July to November 2025.' },
-      { img: 'assets/img/kccf-meta-ads.jpg', pos: 'left center', name: 'KCCF Happy Chuseok Fest', tag: 'Community festival · Blue Bell, PA', ch: 'Sell tickets and bring visitors to the festival website.', built: 'A Meta ad campaign for ticket sales and website visits.', num: '50,565', cap: 'people reached by the ads', capLong: '50,565 viewers and 1,535 link clicks at $0.23 per click. The festival was covered by CBS Philadelphia.' }
+      { img: 'assets/img/porter-website.jpg', pos: 'center', v: 'porter', name: 'Porter', tag: 'Restaurant · Ambler, PA', ch: 'A restaurant opening under a new name needed its website, Google listing and social channels to work together.', built: 'Website, Google Business Profile, Instagram and Meta, connected into one system.', num: '168K', cap: 'profile views', capLong: '168,000 profile views, 24,883 profile interactions and 15,689 website clicks.' },
+      { img: 'assets/img/jimmycar-website.jpg', pos: 'left top', v: 'jcar', name: 'Jimmy’s CarShare', tag: 'Car sharing · Denver, CO', ch: 'A car-sharing business needed to take private rentals and capture car-owner leads on its own site.', built: 'Website, landing page, earnings calculator with lead capture, private-rental booking flow and customer dashboard, plus Google Business Profile optimization.', num: '836', cap: 'Business Profile views', capLong: '836 Business Profile views and 316 interactions, March to August 2026.' },
+      { img: 'assets/img/lumiglow-website.jpg', pos: 'center', v: 'lumiglow', name: 'LumiGlow', tag: 'Korean skincare brand', ch: 'Enter the U.S. market without heavy ad spend.', built: 'A 90-day creator campaign, with Instagram connected to the Shopify store.', num: '844K', cap: 'views on the top creator reel', capLong: '844K views on the top creator reel and 351,628 total Instagram views.' },
+      { img: 'assets/img/british-m-store.jpg', pos: 'center', v: 'britishm', name: 'British M', tag: 'Men\'s grooming brand', ch: 'Grow in the U.S. market.', built: 'Creator research, negotiation and campaign management, creator content and an Amazon storefront.', num: '286K', cap: 'views on the top creator reel', capLong: '286K views on the top creator reel and 109K on the second.' },
+      { img: 'assets/img/tous-les-jours-report.jpg', imgSafe: 'assets/img/tous-les-jours-report-private.jpg', pos: 'left center', v: 'tlj', name: 'Tous les Jours', tag: 'Bakery café', ch: 'Keep the Google Business Profile active and visible.', built: '12 Google posts over three months, plus SEO-focused review replies.', num: '12,892', cap: 'Business Profile interactions', capLong: '12,892 Business Profile interactions, July to November 2025.' },
+      { img: 'assets/img/kccf-meta-ads.jpg', imgSafe: 'assets/img/kccf-meta-ads-private.jpg', pos: 'left center', v: 'kccf', name: 'KCCF Happy Chuseok Fest', tag: 'Community festival · Blue Bell, PA', ch: 'Sell tickets and bring visitors to the festival website.', built: 'A Meta ad campaign for ticket sales and website visits.', num: '50,565', cap: 'people reached by the ads', capLong: '50,565 viewers and 1,535 link clicks at an average cost of $0.23 per link click. The festival was covered by CBS Philadelphia.' }
     ];
     const csI = typeof s.cs === 'number' ? s.cs : -1;
 
     const creativeData = [
-      { client: 'LumiGlow', cat: 'Creator Campaigns', cats: ['Reels', 'Creator Campaigns'], img: 'assets/img/reel-lumiglow-1.jpg', line: 'Creator reel · 844K views', desc: 'Part of LumiGlow\'s 90-day creator campaign to introduce a Korean skincare brand to U.S. customers.', href: 'https://www.instagram.com/reel/Dbn3MnpIfPl/', linkLabel: 'Watch on Instagram' },
+      { v: 'lumiglow', client: 'LumiGlow', cat: 'Creator Campaigns', cats: ['Reels', 'Creator Campaigns'], img: 'assets/img/reel-lumiglow-1.jpg', line: 'Creator reel · 844K views', desc: 'Part of LumiGlow\'s 90-day creator campaign to introduce a Korean skincare brand to U.S. customers.', href: 'https://www.instagram.com/reel/Dbn3MnpIfPl/', linkLabel: 'Watch on Instagram' },
       { client: 'Porter', cat: 'Reels', cats: ['Reels'], img: 'assets/img/reel-porter.jpg', line: 'Restaurant reel', desc: 'Short-form video for Porter in Ambler, PA, made for the restaurant\'s Instagram.', href: 'https://www.instagram.com/porterambler', linkLabel: 'See Porter on Instagram' },
-      { client: 'British M', cat: 'Creator Campaigns', cats: ['Reels', 'Creator Campaigns'], img: 'assets/img/reel-british-m-1.jpg', line: 'Creator reel · 286K views', desc: 'Part of the creator campaign behind British M\'s U.S. market expansion.', href: 'https://www.instagram.com/reel/DbG3jNUomDW/', linkLabel: 'Watch on Instagram' },
+      { v: 'britishm', client: 'British M', cat: 'Creator Campaigns', cats: ['Reels', 'Creator Campaigns'], img: 'assets/img/reel-british-m-1.jpg', line: 'Creator reel · 286K views', desc: 'Part of the creator campaign behind British M\'s U.S. market expansion.', href: 'https://www.instagram.com/reel/DbG3jNUomDW/', linkLabel: 'Watch on Instagram' },
       { client: 'Yume Sushi', cat: 'Reels', cats: ['Reels'], img: 'assets/img/reel-yume-sushi.jpg', line: 'New menu reel', desc: 'A reel introducing Yume Sushi\'s new taco sushi in North Wales, PA.', href: 'https://www.instagram.com/yumesushi.northwales', linkLabel: 'See Yume Sushi on Instagram' },
-      { client: 'KCCF Happy Chuseok Fest', cat: 'Meta Ads', cats: ['Meta Ads'], img: '', line: 'Meta ad campaign', desc: 'A Meta ad campaign for ticket sales and website visits. The festival was covered by CBS Philadelphia.', href: 'https://www.cbsnews.com/philadelphia/news/happy-chuseok-fest-blue-bell-montgomery-county-community-college/', linkLabel: 'Read the CBS Philadelphia story' },
-      { client: 'LumiGlow', cat: 'Creator Campaigns', cats: ['Reels', 'Creator Campaigns'], img: 'assets/img/reel-lumiglow-2.jpg', line: 'Creator reel · 301K views', desc: 'Part of LumiGlow\'s 90-day creator campaign to introduce a Korean skincare brand to U.S. customers.', href: 'https://www.instagram.com/reel/Dc5c4UZsIg3/', linkLabel: 'Watch on Instagram' },
+      { v: 'kccf', client: 'KCCF Happy Chuseok Fest', cat: 'Meta Ads', cats: ['Meta Ads'], img: '', line: 'Meta ad campaign', desc: 'A Meta ad campaign for ticket sales and website visits. The festival was covered by CBS Philadelphia.', href: 'https://www.cbsnews.com/philadelphia/news/happy-chuseok-fest-blue-bell-montgomery-county-community-college/', linkLabel: 'Read the CBS Philadelphia story' },
+      { v: 'lumiglow', client: 'LumiGlow', cat: 'Creator Campaigns', cats: ['Reels', 'Creator Campaigns'], img: 'assets/img/reel-lumiglow-2.jpg', line: 'Creator reel · 301K views', desc: 'Part of LumiGlow\'s 90-day creator campaign to introduce a Korean skincare brand to U.S. customers.', href: 'https://www.instagram.com/reel/Dc5c4UZsIg3/', linkLabel: 'Watch on Instagram' },
       { client: 'Mama Chang', cat: 'Reels', cats: ['Reels'], img: 'assets/img/reel-mama-chang.jpg', line: 'Restaurant reel', desc: 'A reel for Mama Chang in Montgomeryville, PA.', href: 'https://www.instagram.com/mamachangphiladelphia/', linkLabel: 'See Mama Chang on Instagram' },
-      { client: 'British M', cat: 'Creator Campaigns', cats: ['Reels', 'Creator Campaigns'], img: 'assets/img/reel-british-m-2.jpg', line: 'Creator reel · 109K views', desc: 'Part of the creator campaign behind British M\'s U.S. market expansion.', href: 'https://www.instagram.com/reel/Da8FeU3tQa_/', linkLabel: 'Watch on Instagram' },
-      { client: 'LumiGlow', cat: 'Creator Campaigns', cats: ['Reels', 'Creator Campaigns'], img: 'assets/img/reel-lumiglow-3.jpg', line: 'Creator reel · 160K views', desc: 'Part of LumiGlow\'s 90-day creator campaign to introduce a Korean skincare brand to U.S. customers.', href: 'https://www.instagram.com/reel/Dd0Vl1cIh3v/', linkLabel: 'Watch on Instagram' }
+      { v: 'britishm', client: 'British M', cat: 'Creator Campaigns', cats: ['Reels', 'Creator Campaigns'], img: 'assets/img/reel-british-m-2.jpg', line: 'Creator reel · 109K views', desc: 'Part of the creator campaign behind British M\'s U.S. market expansion.', href: 'https://www.instagram.com/reel/Da8FeU3tQa_/', linkLabel: 'Watch on Instagram' },
+      { v: 'lumiglow', client: 'LumiGlow', cat: 'Creator Campaigns', cats: ['Reels', 'Creator Campaigns'], img: 'assets/img/reel-lumiglow-3.jpg', line: 'Creator reel · 160K views', desc: 'Part of LumiGlow\'s 90-day creator campaign to introduce a Korean skincare brand to U.S. customers.', href: 'https://www.instagram.com/reel/Dd0Vl1cIh3v/', linkLabel: 'Watch on Instagram' }
     ];
     const filters = ['All', 'Reels', 'Photography', 'Social Posts', 'Meta Ads', 'Creator Campaigns'];
     const cf = s.cf || 'all';
@@ -191,11 +238,12 @@ class Component extends DCLogic {
     const toCard = (c, i) => ({
       client: c.client,
       cat: c.cat,
-      line: c.line,
+      line: this.VERIFIED[c.v] ? c.line : c.line.replace(/ · [0-9.,]+K? views$/, ''),
       desc: c.desc,
       img: c.img,
       hasImg: !!c.img,
-      isStat: !c.img,
+      isStat: !c.img && !!this.VERIFIED[c.v],
+      isStatText: !c.img && !this.VERIFIED[c.v],
       href: c.href,
       linkLabel: c.linkLabel,
       aria: 'Open ' + c.client + ', ' + c.line,
@@ -236,11 +284,11 @@ class Component extends DCLogic {
       guide: {
         title: 'Get the free Google Optimization Guidebook',
         sub: 'Tell us where to send it. You can open it right away, and we\'ll email you a copy.',
-        fields: [F.name, F.biz, F.email, F.ig, F.web, { id: 'interest', label: 'Primary marketing interest', type: 'select', opts: [pick1, 'Showing up on Google', 'A better website', 'Social media', 'Meta ads', 'Branding', 'CRM and automation', 'Creator marketing', 'Not sure yet'] }, { id: 'lang', label: 'Guide language', type: 'lang', full: true }, consent],
+        fields: [F.name, F.biz, F.email, F.phone, { id: 'gbp', label: 'Google Business Profile link', type: 'url', req: true, ph: 'https://maps.app.goo.gl/...', full: true }, { id: 'nogbp', label: 'I don\'t have a Google Business Profile yet', type: 'check', full: true }, { id: 'category', label: 'Business category', type: 'select', opts: [pick1, 'Restaurant or café', 'Beauty and wellness', 'Real estate', 'Automotive', 'Retail', 'Professional services', 'Other'] }, { id: 'interest', label: 'Primary marketing interest', type: 'select', opts: [pick1, 'Showing up on Google', 'A better website', 'Social media', 'Meta ads', 'Branding', 'CRM and automation', 'Creator marketing', 'Not sure yet'] }, F.ig, F.web, { id: 'lang', label: 'Guide language', type: 'lang', full: true }, consent],
         submit: 'Get My Free Guide',
         doneTitle: 'Your guide is ready',
-        doneText: 'We\'ve emailed the ' + langName + ' guide to you. You can also open it now.',
-        doneLink: 'Open the guide', doneHref: '#resources',
+        doneText: s.emailed === false ? 'Your ' + langName + ' guide is ready to open now. We could not email a copy just now, but our team has been told and will send it to you.' : 'We\'ve emailed the ' + langName + ' guide to you. You can also open it now.',
+        doneLink: 'Open the guide', doneHref: this.LEADS.guideBase + (this.LEADS.guideFiles[lang] || this.LEADS.guideFiles.en),
         offerQ: 'Want to know how your Business performs on Google?', offerLabel: 'Get a free business audit', offerTo: 'audit'
       },
       kit: {
@@ -367,9 +415,10 @@ class Component extends DCLogic {
       }),
       ps: { s0: pIdx === 0, s1: pIdx === 1, s2: pIdx === 2, s3: pIdx === 3, s4: pIdx === 4, s5: pIdx === 5, s6: pIdx === 6 },
 
-      cases: caseData.map((c, i) => ({ img: c.img, pos: c.pos, name: c.name, tag: c.tag, num: c.num, cap: c.cap, aria: 'Open the ' + c.name + ' case study', open: () => this.setState({ cs: i, menuOpen: false }) })),
+      workSub: caseData.some((c) => this.VERIFIED[c.v]) ? 'Websites, Google optimization, creator campaigns and ads for real businesses, with the results they produced.' : 'Websites, Google optimization, creator campaigns and ads for real businesses.',
+      cases: caseData.map((c, i) => ({ img: this.VERIFIED[c.v] ? c.img : (c.imgSafe || c.img), pos: c.pos, name: c.name, tag: c.tag, num: c.num, cap: c.cap, hasNum: !!this.VERIFIED[c.v], noNum: !this.VERIFIED[c.v], aria: 'Open the ' + c.name + ' case study', open: () => this.setState({ cs: i, menuOpen: false }) })),
       caseOpen: csI >= 0,
-      cz: caseData[csI >= 0 ? csI : 0],
+      cz: Object.assign({}, caseData[csI >= 0 ? csI : 0], { hasNum: !!this.VERIFIED[caseData[csI >= 0 ? csI : 0].v], img: this.VERIFIED[caseData[csI >= 0 ? csI : 0].v] ? caseData[csI >= 0 ? csI : 0].img : (caseData[csI >= 0 ? csI : 0].imgSafe || caseData[csI >= 0 ? csI : 0].img) }),
       closeCase: () => this.setState({ cs: -1 }),
       caseGo: { c0: () => this.setState({ cs: 0 }), c1: () => this.setState({ cs: 1 }), c2: () => this.setState({ cs: 2 }), c3: () => this.setState({ cs: 3 }), c4: () => this.setState({ cs: 4 }), c5: () => this.setState({ cs: 5 }) },
       casePrev: () => this.setState({ cs: (csI + caseData.length - 1) % caseData.length }),
@@ -404,7 +453,10 @@ class Component extends DCLogic {
         sub: mk.sub,
         note: mk.note || '',
         hasNote: !!mk.note,
-        submit: mk.submit,
+        submit: s.sending ? 'Sending...' : mk.submit,
+        sending: s.sending ? 'true' : 'false',
+        hasSendErr: !!s.sendErr,
+        sendErr: s.sendErr || '',
         doneTitle: mk.doneTitle,
         doneText: mk.doneText,
         hasDoneLink: !!mk.doneLink,
