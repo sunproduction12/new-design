@@ -474,4 +474,5 @@ class Component extends DCLogic {
   }
 }
 
-preact.render(preact.h(Component, {}), document.getElementById('app'));
+var __app = document.getElementById('app');
+(__app.firstElementChild ? preact.hydrate : preact.render)(preact.h(Component, {}), __app);
