@@ -24,6 +24,20 @@ class Component extends DCLogic {
       setTimeout(() => el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' }), 40);
     };
     document.addEventListener('click', this.onAnchor, true);
+    // sticky audit/call bar: appears after the hero, hides while the footer is on screen
+    this.onSbar = () => {
+      const bar = document.getElementById('sbar'); if (!bar) return;
+      const f = document.querySelector('footer');
+      const vh = window.innerHeight || 800;
+      const show = (window.scrollY || document.documentElement.scrollTop || 0) > vh * 0.7 && !(f && f.getBoundingClientRect().top < vh - 40);
+      if (show !== this.sbarOn) { this.sbarOn = show; bar.classList.toggle('on', show); }
+    };
+    window.addEventListener('scroll', this.onSbar, { passive: true });
+    window.addEventListener('resize', this.onSbar);
+    // footer sections: collapsible on phones, always open on desktop
+    if (window.matchMedia && window.matchMedia('(max-width: 860px)').matches) {
+      Array.prototype.forEach.call(document.querySelectorAll('details.fcol'), (d) => d.removeAttribute('open'));
+    }
     this.onCrScroll = (e) => {
       if (!e.target || e.target.id !== 'crt') return;
       clearTimeout(this.crT);
@@ -75,6 +89,8 @@ class Component extends DCLogic {
 
   componentWillUnmount() {
     document.removeEventListener('click', this.onAnchor, true);
+    window.removeEventListener('scroll', this.onSbar);
+    window.removeEventListener('resize', this.onSbar);
     document.removeEventListener('scroll', this.onCrScroll, true);
     clearInterval(this.crTimer);
     clearInterval(this.stepTimer);
