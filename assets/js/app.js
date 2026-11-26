@@ -24,6 +24,26 @@ class Component extends DCLogic {
       setTimeout(() => el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' }), 40);
     };
     document.addEventListener('click', this.onAnchor, true);
+    // one-card carousels: keep the dots in step and make dots and arrows work
+    this.swStep = (t) => { const c = t.firstElementChild; if (!c) return 1; const gap = parseFloat(getComputedStyle(t).columnGap || getComputedStyle(t).gap) || 0; return c.offsetWidth + gap; };
+    this.swUpdate = (t) => {
+      const c = t.nextElementSibling; if (!c || !c.classList.contains('swc')) return;
+      const n = t.children.length; const i = Math.max(0, Math.min(n - 1, Math.round(t.scrollLeft / this.swStep(t))));
+      Array.prototype.forEach.call(c.querySelectorAll('.sdot'), (d, k) => d.classList.toggle('on', k === i));
+      const b = c.querySelectorAll('.swb'); if (b[0]) b[0].style.opacity = i === 0 ? '.4' : '1'; if (b[1]) b[1].style.opacity = i === n - 1 ? '.4' : '1';
+    };
+    this.onSwScroll = (e) => { const t = e.target; if (t && t.classList && t.classList.contains('swipe')) { cancelAnimationFrame(this.swRaf); this.swRaf = requestAnimationFrame(() => this.swUpdate(t)); } };
+    this.onSwClick = (e) => {
+      const b = e.target && e.target.closest ? e.target.closest('[data-sw]') : null; if (!b) return;
+      const c = b.closest('.swc'); const t = c && c.previousElementSibling; if (!t || !t.classList.contains('swipe')) return;
+      const step = this.swStep(t); const n = t.children.length; const cur = Math.round(t.scrollLeft / step); const v = b.getAttribute('data-sw');
+      const to = v === 'prev' ? cur - 1 : v === 'next' ? cur + 1 : parseInt(v, 10);
+      const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      t.scrollTo({ left: Math.max(0, Math.min(n - 1, to)) * step, behavior: reduce ? 'auto' : 'smooth' });
+    };
+    document.addEventListener('scroll', this.onSwScroll, true);
+    document.addEventListener('click', this.onSwClick);
+    setTimeout(() => Array.prototype.forEach.call(document.querySelectorAll('.swipe'), (t) => this.swUpdate(t)), 300);
     // sticky audit/call bar: appears after the hero, hides while the footer is on screen
     this.onSbar = () => {
       const bar = document.getElementById('sbar'); if (!bar) return;
@@ -89,6 +109,8 @@ class Component extends DCLogic {
 
   componentWillUnmount() {
     document.removeEventListener('click', this.onAnchor, true);
+    document.removeEventListener('scroll', this.onSwScroll, true);
+    document.removeEventListener('click', this.onSwClick);
     window.removeEventListener('scroll', this.onSbar);
     window.removeEventListener('resize', this.onSbar);
     document.removeEventListener('scroll', this.onCrScroll, true);
@@ -268,7 +290,7 @@ class Component extends DCLogic {
 
     const crBase = shown.map((x) => toCard(x.c, x.i));
     this.crN = crBase.length;
-    this.crLoop = crBase.length >= 4;
+    this.crLoop = crBase.length >= 4 && !(window.matchMedia && window.matchMedia('(max-width: 760px)').matches);
     const crList = this.crLoop ? crBase.concat(crBase, crBase) : crBase;
     const lbI = typeof s.lb === 'number' ? s.lb : -1;
     const lbCard = lbI >= 0 ? toCard(creativeData[lbI], lbI) : toCard(creativeData[0], 0);
@@ -429,6 +451,10 @@ class Component extends DCLogic {
         const on = i === pIdx;
         return { n: '0' + (i + 1), label: label, pressed: on ? 'true' : 'false', bar: on ? accentDeep : 'rgba(20, 32, 43, 0.12)', fg: on ? '#14202B' : '#3D4C5A', w: on ? 700 : 500, numC: on ? accentDeep : '#4A5A69', pick: () => this.setState({ prob: i }) };
       }),
+      probPrev: () => this.setState({ prob: (pIdx + probShort.length - 1) % probShort.length }),
+      probNext: () => this.setState({ prob: (pIdx + 1) % probShort.length }),
+      probStep: '0' + (pIdx + 1) + ' / 0' + probShort.length,
+      probTitle: probShort[pIdx],
       ps: { s0: pIdx === 0, s1: pIdx === 1, s2: pIdx === 2, s3: pIdx === 3, s4: pIdx === 4, s5: pIdx === 5, s6: pIdx === 6 },
 
       workSub: caseData.some((c) => this.VERIFIED[c.v]) ? 'Websites, Google optimization, creator campaigns and ads for real businesses, with the results they produced.' : 'Websites, Google optimization, creator campaigns and ads for real businesses.',
