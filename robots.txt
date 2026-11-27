@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://sunproduction12.github.io/new-design/sitemap.xml
+Sitemap: https://sunpd.app/sitemap.xml
