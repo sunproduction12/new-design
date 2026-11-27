@@ -53,6 +53,19 @@ class Component extends DCLogic {
       if (show !== this.sbarOn) { this.sbarOn = show; bar.classList.toggle('on', show); }
     };
     window.addEventListener('scroll', this.onSbar, { passive: true });
+    this.onVid = (e) => {
+      const v = e.target;
+      if (!v || v.tagName !== 'VIDEO') return;
+      v.muted = true;
+      v.loop = true;
+      v.playsInline = true;
+      const p = v.play();
+      if (p && p.catch) p.catch(() => {});
+    };
+    document.addEventListener('loadeddata', this.onVid, true);
+    this.syncVid = () => document.querySelectorAll('video').forEach((v) => this.onVid({ target: v }));
+    this.syncVid();
+    this.vidTimer = setInterval(this.syncVid, 1500);
     window.addEventListener('resize', this.onSbar);
     // footer sections: collapsible on phones, always open on desktop
     if (window.matchMedia && window.matchMedia('(max-width: 860px)').matches) {
@@ -112,6 +125,8 @@ class Component extends DCLogic {
     document.removeEventListener('scroll', this.onSwScroll, true);
     document.removeEventListener('click', this.onSwClick);
     window.removeEventListener('scroll', this.onSbar);
+    document.removeEventListener('loadeddata', this.onVid, true);
+    clearInterval(this.vidTimer);
     window.removeEventListener('resize', this.onSbar);
     document.removeEventListener('scroll', this.onCrScroll, true);
     clearInterval(this.crTimer);
@@ -280,6 +295,8 @@ class Component extends DCLogic {
       desc: c.desc,
       img: c.img,
       hasImg: !!c.img,
+      hasVideo: c.cats.indexOf('Reels') >= 0,
+      video: '/assets/video/reel-' + (i + 1) + '.mp4',
       isStat: !c.img && !!this.VERIFIED[c.v],
       isStatText: !c.img && !this.VERIFIED[c.v],
       href: c.href,
