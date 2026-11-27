@@ -10,7 +10,7 @@ class Component extends DCLogic {
   // Change a client to true once its numbers are confirmed.
   VERIFIED = { porter: false, jcar: false, lumiglow: false, britishm: false, tlj: false, kccf: false };
 
-  state = { industry: 0, prob: 0, menuOpen: false, modal: '', sent: false, sending: false, sendErr: '', emailed: true, errs: {}, lang: 'en', cf: 'all', lb: -1, cs: -1 };
+  state = { industry: 0, prob: 0, menuOpen: false, modal: '', sent: false, sending: false, sendErr: '', emailed: true, errs: {}, lang: 'en', cf: 'all', lb: -1, cs: -1, ex: false };
 
   componentDidMount() {
     this.onAnchor = (e) => {
@@ -20,15 +20,23 @@ class Component extends DCLogic {
       const el = id ? document.getElementById(id) : null;
       if (!el) return;
       e.preventDefault();
+      const tab = a.getAttribute('data-tab');
+      if (tab) this.setState({ cf: tab, menuOpen: false });
       const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      setTimeout(() => el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' }), 40);
+      setTimeout(() => el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' }), tab ? 120 : 40);
     };
     document.addEventListener('click', this.onAnchor, true);
     // one-card carousels: keep the dots in step and make dots and arrows work
     this.swStep = (t) => { const c = t.firstElementChild; if (!c) return 1; const gap = parseFloat(getComputedStyle(t).columnGap || getComputedStyle(t).gap) || 0; return c.offsetWidth + gap; };
     this.swUpdate = (t) => {
       const c = t.nextElementSibling; if (!c || !c.classList.contains('swc')) return;
-      const n = t.children.length; const i = Math.max(0, Math.min(n - 1, Math.round(t.scrollLeft / this.swStep(t))));
+      const n = t.children.length; const step = this.swStep(t);
+      if (c.getAttribute('data-dyn')) {
+        const d = c.querySelector('.swd');
+        if (d && d.children.length !== n && n > 0) { d.innerHTML = Array.apply(null, Array(n)).map((x, k) => '<button type="button" class="sdot" data-sw="' + k + '" aria-label="Go to card ' + (k + 1) + ' of ' + n + '"></button>').join(''); }
+      }
+      let i = Math.max(0, Math.min(n - 1, Math.round(t.scrollLeft / step)));
+      if (t.scrollLeft >= t.scrollWidth - t.clientWidth - 3 && t.scrollWidth > t.clientWidth + 3) i = n - 1;
       Array.prototype.forEach.call(c.querySelectorAll('.sdot'), (d, k) => d.classList.toggle('on', k === i));
       const b = c.querySelectorAll('.swb'); if (b[0]) b[0].style.opacity = i === 0 ? '.4' : '1'; if (b[1]) b[1].style.opacity = i === n - 1 ? '.4' : '1';
     };
@@ -53,17 +61,23 @@ class Component extends DCLogic {
       if (show !== this.sbarOn) { this.sbarOn = show; bar.classList.toggle('on', show); }
     };
     window.addEventListener('scroll', this.onSbar, { passive: true });
-    this.onVid = (e) => {
-      const v = e.target;
+    // videos load and play only while on screen (lazy), muted and looping
+    this.vidSeen = typeof WeakSet !== 'undefined' ? new WeakSet() : null;
+    this.vidPlay = (v) => {
       if (!v || v.tagName !== 'VIDEO') return;
-      v.muted = true;
-      v.loop = true;
-      v.playsInline = true;
-      const p = v.play();
-      if (p && p.catch) p.catch(() => {});
+      if (!v.getAttribute('src') && v.getAttribute('data-src')) { v.src = v.getAttribute('data-src'); }
+      v.muted = true; v.loop = true; v.playsInline = true; v.setAttribute('playsinline', '');
+      const p = v.play(); if (p && p.catch) p.catch(() => {});
     };
+    this.vidIO = typeof IntersectionObserver !== 'undefined' ? new IntersectionObserver((es) => {
+      es.forEach((en) => { const v = en.target; v._vis = en.isIntersecting; if (en.isIntersecting) this.vidPlay(v); else if (!v.paused) v.pause(); });
+    }, { rootMargin: '160px 0px', threshold: 0.01 }) : null;
+    this.onVid = (e) => { const v = e.target; if (v && v.tagName === 'VIDEO' && (!this.vidIO || v._vis)) this.vidPlay(v); };
     document.addEventListener('loadeddata', this.onVid, true);
-    this.syncVid = () => document.querySelectorAll('video').forEach((v) => this.onVid({ target: v }));
+    this.syncVid = () => document.querySelectorAll('video').forEach((v) => {
+      if (this.vidIO) { if (!this.vidSeen.has(v)) { this.vidSeen.add(v); this.vidIO.observe(v); } else if (v._vis && v.paused) this.vidPlay(v); }
+      else this.vidPlay(v);
+    });
     this.syncVid();
     this.vidTimer = setInterval(this.syncVid, 1500);
     window.addEventListener('resize', this.onSbar);
@@ -127,6 +141,7 @@ class Component extends DCLogic {
     window.removeEventListener('scroll', this.onSbar);
     document.removeEventListener('loadeddata', this.onVid, true);
     clearInterval(this.vidTimer);
+    if (this.vidIO) this.vidIO.disconnect();
     window.removeEventListener('resize', this.onSbar);
     document.removeEventListener('scroll', this.onCrScroll, true);
     clearInterval(this.crTimer);
@@ -260,6 +275,14 @@ class Component extends DCLogic {
     ];
     const iIdx = s.industry || 0;
     const ind = industries[iIdx];
+    const QD = [
+      { k1: 'lunch near me', k2: 'best dinner place near me', k3: 'best sushi near me', c1: 'Golden Garden Kitchen', c2: 'Harbor Sushi House', biz: ind.bizName, cat: 'Restaurant', menu: 'Menu', ph: ['assets/img/reel-yume-sushi.jpg', 'assets/img/reel-mama-chang.jpg', 'assets/img/reel-porter.jpg'], lb: ['', '', ''] },
+      { k1: 'homes for sale near me', k2: 'real estate agent near me', k3: 'open houses this weekend', c1: 'Maple Street Realty', c2: 'Keystone Home Group', biz: 'Your agency', cat: 'Real estate agency', menu: 'Listings', ph: ['', '', ''], lb: ['Exterior', 'Interior', 'Team'] },
+      { k1: 'car rental near me', k2: 'cheap car rental near me', k3: 'SUV rental near me', c1: 'Metro Car Rental', c2: 'Quick Wheels Rental', biz: ind.bizName, cat: 'Car rental', menu: 'Fleet', ph: ['assets/img/jcar-ig-1.jpg', 'assets/img/jcar-ig-2.jpg', 'assets/img/jcar-ig-3.jpg'], lb: ['', '', ''] },
+      { k1: 'nail salon near me', k2: 'best nail salon near me', k3: 'gel manicure near me', c1: 'Luxe Nail Studio', c2: 'Polish & Co', biz: 'Your salon', cat: 'Nail salon and spa', menu: 'Services', ph: ['', '', ''], lb: ['Nails', 'Salon', 'Team'] }
+    ][iIdx];
+    const qd = { k1: QD.k1, k2: QD.k2, k3: QD.k3, c1: QD.c1, c2: QD.c2, biz: QD.biz, cat: QD.cat, menu: QD.menu };
+    [0, 1, 2].forEach((k) => { qd['b' + (k + 1)] = QD.ph[k] ? "url('" + QD.ph[k] + "')" : 'none'; qd['l' + (k + 1)] = QD.lb[k]; });
 
     const probShort = ['Google Maps visibility', 'Outdated website', 'Inconsistent social media', 'Missing follow‑ups', 'Weak reputation', 'Disconnected systems', 'Lost leads'];
     const pIdx = s.prob || 0;
@@ -287,7 +310,7 @@ class Component extends DCLogic {
     ];
     const filters = ['All', 'Reels', 'Photography', 'Social Posts', 'Meta Ads', 'Creator Campaigns'];
     const cf = s.cf || 'all';
-    const shown = creativeData.map((c, i) => ({ c: c, i: i })).filter((x) => cf === 'all' || x.c.cats.indexOf(cf) >= 0);
+    const shown = creativeData.map((c, i) => ({ c: c, i: i })).filter((x) => x.c.cats.indexOf('Reels') >= 0 && (cf === 'all' || x.c.cats.indexOf(cf) >= 0));
     const toCard = (c, i) => ({
       client: c.client,
       cat: c.cat,
@@ -489,6 +512,12 @@ class Component extends DCLogic {
         return { label: f, pressed: on ? 'true' : 'false', bg: on ? '#14202B' : '#FFFFFF', fg: on ? '#FFFFFF' : '#14202B', bd: on ? '#14202B' : '#C9D5E1', pick: () => { this.setState({ cf: id }); setTimeout(() => this.centerCreative(), 60); } };
       }),
       creative: crList,
+      v: { reelRow: cf === 'all' || cf === 'Reels' || cf === 'Creator Campaigns', photo: cf === 'Photography', social: cf === 'Social Posts', meta: cf === 'Meta Ads', creator: cf === 'Creator Campaigns' },
+      qd: qd,
+      exOpen: !!s.ex,
+      openEx: () => this.setState({ ex: true, menuOpen: false }),
+      closeEx: () => this.setState({ ex: false }),
+      exAudit: () => { this.setState({ ex: false }); setTimeout(() => this.openModal('audit'), 60); },
       cfEmpty: shown.length === 0,
       cfName: cf === 'all' ? 'creative' : cf.toLowerCase(),
       crPrev: () => { this.crHold = performance.now() + 7000; this.scrollCreative(-1); },
